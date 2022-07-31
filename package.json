@@ -12,9 +12,11 @@
     "serverless-google-cloudfunctions": "*"
   },
   "dependencies": {
+    "@google-cloud/datastore": "^7.0.0",
     "@google-cloud/functions-framework": "^3.1.2",
     "@google-cloud/pubsub": "^3.1.0",
     "@google-cloud/storage": "^6.2.3",
+    "crypto-js": "^4.1.1",
     "escape-html": "^1.0.3",
     "imagemagick-stream": "^4.1.1",
     "sharp": "^0.30.7"
