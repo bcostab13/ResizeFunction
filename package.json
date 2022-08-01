@@ -18,7 +18,9 @@
     "@google-cloud/storage": "^6.2.3",
     "crypto-js": "^4.1.1",
     "escape-html": "^1.0.3",
+    "express": "^4.18.1",
     "imagemagick-stream": "^4.1.1",
+    "path-to-regexp": "^6.2.1",
     "sharp": "^0.30.7"
   },
   "repository": {
