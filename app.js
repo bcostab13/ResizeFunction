@@ -4,7 +4,7 @@ const express = require('express')
 const crypto = require('crypto');
 const bodyParser = require('body-parser')
 
-const projectId = 'innoqatest';
+const projectId = 'innoqatest'; //use here your own project name
 const topicName = 'tasks';
 
 
@@ -20,11 +20,11 @@ app.use(bodyParser.json())
 const port = 3000
 
 /**
- * Create a task. It receives the original image path.
+ * Get task detail. It receives the taskId.
  *
  * @param {Object} req Function request.
  * Example:
- * {"path":"example.jpg"}
+ * {"taskId":"0129377-746282asd"}
  * @param {Object} res Function response.
  * 
  * gcloud functions deploy task --runtime nodejs14 --trigger-http --allow-unauthenticated
@@ -43,7 +43,7 @@ app.get('/task/:taskId', (req, res) => {
 });
 
 /**
- * Get task detail. It receives the taskId.
+ * Create a task. It receives the original image path.
  *
  * @param {Object} req Function request.
  * Example:
@@ -75,6 +75,7 @@ app.post('/task', (req, res) => {
     function(result) {
       const taskKey = datastore.key(['Task', taskId]);
       res.status(200).send({taskId: taskKey.name, status: 'SUBMITTED'});
+      // Update task status
       saveTask(taskKey, originalImagePath);
     }, function(error) {
       res.status(500).send('Cannot process your request. Retry in a moment.');
@@ -82,6 +83,11 @@ app.post('/task', (req, res) => {
   );  
 });
 
+/**
+ * Utility function to save an entity in kind Task
+ * @param {String} taskKey Key (kind,id) of new task
+ * @param {String} path Path of the image relate to new task
+ */
 async function saveTask(taskKey, path) {
     const task = {
       status: 'SUBMITTED',
