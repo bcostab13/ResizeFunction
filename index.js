@@ -2,8 +2,8 @@ const functions = require('@google-cloud/functions-framework');
 const {PubSub} = require('@google-cloud/pubsub');
 const {Storage} = require('@google-cloud/storage');
 const {Datastore} = require('@google-cloud/datastore');
+const imagemagick = require("imagemagick-stream");
 const crypto = require('crypto');
-const MD5 = require("crypto-js/md5");
 
 const storage = new Storage();
 const pubsub = new PubSub();
@@ -11,7 +11,7 @@ const datastore = new Datastore();
 
 const topicName = 'tasks';
 const bucketName = 'imagestorage-iq';
-const imagemagick = require("imagemagick-stream");
+const temporalName = 'pending-md5';
 
 /**
  * Create a task. It receives the original image path.
@@ -29,9 +29,11 @@ functions.http('task', (req, res) => {
   // Get topic to publish the task request
   const topic = pubsub.topic(topicName);
   // Prepare message to publish
+  const taskId = crypto.randomUUID();
   const messageObject = {
     data: {
-      message: originalImagePath,
+      path: originalImagePath,
+      taskId: taskId
     },
   };
   const messageBuffer = Buffer.from(JSON.stringify(messageObject), 'utf8');
@@ -39,20 +41,17 @@ functions.http('task', (req, res) => {
   // Publish message to be process
   topic.publishMessage({data: messageBuffer}).then(
     function(result) {
-      taskId = crypto.randomUUID();
-      res.status(200).send({taskId: taskId, status: 'SUBMITTED'});
-      saveTask(originalImagePath, taskId);
+      const taskKey = datastore.key(['Task', taskId]);
+      res.status(200).send({taskId: taskKey.name, status: 'SUBMITTED'});
+      saveTask(taskKey, originalImagePath);
     }, function(error) {
       res.status(500).send('Cannot process your request. Retry in a moment.');
     }
-  );
-  
+  );  
 });
 
-async function saveTask(path, uuid) {
-  const taskKey = datastore.key('Task');
+async function saveTask(taskKey, path) {
   const task = {
-    taskId: uuid,
     status: 'SUBMITTED',
     originalImagePath: path,
     createdAt: new Date(),
@@ -76,17 +75,28 @@ async function saveTask(path, uuid) {
 * @param {object} message The Pub/Sub message.
 * @param {object} context The event metadata.
 */
-exports.helloPubSub = (message, context) => {
+exports.resize = (message, context) => {
   const messageBody = message.data
    ? Buffer.from(message.data, 'base64').toString():'';
    const messageObj = JSON.parse(messageBody);
-   const path = messageObj.data.message;
-  console.log(path);
-  resizeImage(path, 1024);
-  resizeImage(path, 800);
+   const path = messageObj.data.path;
+   const taskId = messageObj.data.taskId;
+  console.log('Path:' + path);
+  console.log('TaskId:' + taskId);
+  updateStatus(taskId, 'SETTLING').then(function(result) {
+    Promise.all([resizeImage(path, 1024, taskId), resizeImage(path, 800, taskId)])
+      .then(values => {
+        console.log(values);
+        if(values[0]=='OK' && values[1]=='OK'){
+          updateStatus(taskId, 'SETTLED');
+        } else {
+          updateStatus(taskId, 'FAILED');
+        }
+      });
+  });
 };
 
-async function resizeImage(path, size) {
+async function resizeImage(path, size, taskId) {
   const bucket = storage.bucket(bucketName);
   const file = bucket.file(path);
   console.log('File Name:' + file.name);
@@ -98,7 +108,7 @@ async function resizeImage(path, size) {
   let srcStream = file.createReadStream();
   
   let resize = imagemagick().resize(size + 'x' + size);
-  let newFilename = 'output/' + fileNoExt + '/' + size + '/' + 'pending-md5' + '.' +fileExt;
+  let newFilename = 'output/' + fileNoExt + '/' + size + '/' + temporalName + '.' +fileExt;
   console.log('New File:' + newFilename);
   let gcsNewObject = bucket.file(newFilename);
   let dstStream = gcsNewObject.createWriteStream();
@@ -112,21 +122,65 @@ async function resizeImage(path, size) {
       })
       .on("finish", () => {
         console.log(`Success: ${fileName} → ${newFilename}`);
-        
         gcsNewObject.setMetadata(
         {
             contentType: 'image/'+ 'jpg'
         }, function(err, apiResponse) {});
         renameFile(newFilename);
+        // updateStatus(taskId, 'SIZE_' + size + '_READY');
+        resolve('OK');
       });
   });
+}
+
+async function updateStatus(taskId, status) {
+  const transaction = datastore.transaction();
+  const taskKey = datastore.key(['Task', taskId]);
+  try {
+    await transaction.run();
+    const [task] = await transaction.get(taskKey);
+    // const [task] = await datastore.get(taskKey);
+    switch(task.status){
+      case 'SUBMITTED':
+        task.status = status;
+        break;
+      case 'SETTLING':
+        task.status = status;
+        break;
+      case 'SIZE_1024_READY':
+        if(status == 'SIZE_800_READY') {task.status = 'SETTLED';}
+        if(status == 'FAILED') {task.status = status;}
+        break;
+      case 'SIZE_800_READY':
+        if(status == 'SIZE_1024_READY') {task.status = 'SETTLED';}
+        if(status == 'FAILED') {task.status = status;}
+        break;
+      case 'FAILED':
+        break;
+    }
+    task.lastModifiedAt = new Date();
+    // await datastore.upsert({
+    //   key: taskKey,
+    //   data: task,
+    // });
+    transaction.save({
+      key: taskKey,
+      data: task,
+    });
+    await transaction.commit();
+    console.log(`Task ${taskId} updated successfully to ${status}.`);
+  } catch (err) {
+    await transaction.rollback();
+    throw err;
+  }
 }
 
 async function renameFile(srcFileName) {
   // renames the file
   const file = storage.bucket(bucketName).file(srcFileName);
-  const md5Value = MD5(file).toString();
-  const destFileName = srcFileName.replace('pending-md5', md5Value)
+  const [metadata] = await file.getMetadata();
+  const md5Value = metadata.md5Hash;
+  const destFileName = srcFileName.replace(temporalName, md5Value)
   await file.rename(destFileName);
 
   console.log(
