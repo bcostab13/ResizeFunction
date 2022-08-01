@@ -8,13 +8,13 @@ const crypto = require('crypto');
 const storage = new Storage();
 const datastore = new Datastore();
 
-const bucketName = 'imagestorage-iq';
+const bucketName = 'imagestorage-iq'; // use here your own bucket name
 const temporalName = 'pending-md5';
 
 /**
 * Background Cloud Function to be triggered by Pub/Sub.
-* This function is exported by index.js, and executed when
-* the trigger topic receives a message.
+* It is executed when the trigger topic receives a message.
+* Create two thumbnails from the original image.
 *
 * @param {object} message The Pub/Sub message.
 * @param {object} context The event metadata.
@@ -41,6 +41,14 @@ exports.resize = (message, context) => {
   });
 };
 
+/**
+ * Function that generate a new scaled image as output.
+ * 
+ * @param {string} path Path from original image
+ * @param {int} size Size to scale
+ * @param {string} taskId Id of related task
+ * @returns 
+ */
 async function resizeImage(path, size, taskId) {
   const bucket = storage.bucket(bucketName);
   const file = bucket.file(path);
@@ -77,6 +85,12 @@ async function resizeImage(path, size, taskId) {
   });
 }
 
+/**
+ * Function to update the status of a task
+ * 
+ * @param {string} taskId Id of related task 
+ * @param {string} status New status to be set
+ */
 async function updateStatus(taskId, status) {
   const transaction = datastore.transaction();
   const taskKey = datastore.key(['Task', taskId]);
@@ -106,8 +120,14 @@ async function updateStatus(taskId, status) {
   }
 }
 
+/**
+ * Utility function to rename image with its md5hash
+ * 
+ * @param {string} taskId Id of related task
+ * @param {string} originalPath Original path of the image
+ * @param {string} srcFileName  Path of rescaled image
+ */
 async function renameFile(taskId, originalPath, srcFileName) {
-  // renames the file
   const file = storage.bucket(bucketName).file(srcFileName);
   const [metadata] = await file.getMetadata();
   const md5Value = metadata.md5Hash;
@@ -120,6 +140,15 @@ async function renameFile(taskId, originalPath, srcFileName) {
   );
 }
 
+/**
+ * Function to save image details.
+ * 
+ * @param {string} taskId Id of related task
+ * @param {string} resolution Resolution of output image
+ * @param {string} md5hash MD5 of the image
+ * @param {string} path Path of the image
+ * @param {string} originalPath Path of the original image
+ */
 async function saveImage(taskId, resolution, md5hash, path, originalPath) {
   const image = {
     taskId: taskId,

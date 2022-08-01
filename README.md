@@ -1,6 +1,8 @@
 # ResizeFunction
 Serverless function to create a task to resize an image.
 
+**Autor:** Brenda Costa
+
 ## Pre-Requisites
 To use this base project, you must have installed:
 - nodejs
@@ -8,6 +10,11 @@ To use this base project, you must have installed:
 - gcloud CLI
 
 Javascript libraries must be install using `npm install` before start app. 
+
+## Architecture
+There is a single graph that shows how components work together below:
+
+![Architecture](Arquitectura.png "Architecture")
 
 ## API Endpoints and Function
 This project contains 2 API endpoints:
